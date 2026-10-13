@@ -1,9 +1,11 @@
 # turn-context.sh's JSON work, after json.awk. POSIX awk, run under LC_ALL=C.
-# mode=prompt parses the UserPromptSubmit input and prints two lines: "self"
-# for a prompt Claude Code sent itself (it opens with a tag) or "user", then
-# the transcript path. Input that does not parse prints "user" and no path.
+# mode=prompt parses the UserPromptSubmit input and prints two lines, then the
+# transcript path: "skip" for a prompt the runtime sent itself (it opens with
+# a tag) or one inside a Codex subagent (it carries agent_type), else "user".
+# Input that does not parse prints "user" and no path.
 # mode=subagent prints the SubagentStart output: Claude Code passes a
-# subagent only hookSpecificOutput.additionalContext, not plain stdout.
+# subagent only hookSpecificOutput.additionalContext, not plain stdout, and
+# Codex reads either.
 BEGIN {
   if (mode == "prompt") {
     if (!jparse()) {
@@ -13,7 +15,7 @@ BEGIN {
     }
     p = jget("/prompt")
     sub(/^[ \t\r\n]+/, "", p)
-    print (substr(p, 1, 1) == "<" ? "self" : "user")
+    print (substr(p, 1, 1) == "<" || jget("/agent_type") != "" ? "skip" : "user")
     print jget("/transcript_path")
     exit
   }

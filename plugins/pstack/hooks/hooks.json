@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/turn-context.sh\" prompt",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/turn-context.sh\" claude prompt",
             "timeout": 5
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/turn-context.sh\" subagent",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/turn-context.sh\" claude subagent",
             "timeout": 5
           }
         ]
