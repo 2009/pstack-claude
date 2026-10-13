@@ -85,6 +85,26 @@ describe("UserPromptSubmit reminder", () => {
     });
   }
 
+  test("decodes an escaped transcript path", () => {
+    const input = (home) => {
+      const dir = join(home, 'quote"and\\slash');
+      mkdirSync(dir);
+      const path = join(dir, "t.jsonl");
+      writeFileSync(path, '{"type":"tool_use","name":"Skill","input":{"skill":"pstack:poteto-mode"}}\n');
+      return JSON.stringify({ prompt: "x", transcript_path: path });
+    };
+    expect(run(promptHook, input).out).toBe("");
+  });
+
+  test("reminds on input that is not one JSON object", () => {
+    expect(run(promptHook, '{"prompt": "x"').out).toBe(reminder);
+    expect(run(promptHook, "").out).toBe(reminder);
+  });
+
+  test("stays quiet on a prompt Claude Code sends itself, after leading whitespace too", () => {
+    expect(run(promptHook, withTranscript([], "\n  <task-notification>done</task-notification>")).out).toBe("");
+  });
+
   test("stays quiet on a prompt Claude Code sends itself", () => {
     expect(run(promptHook, withTranscript([], "<task-notification>agent done</task-notification>")).out).toBe("");
   });
@@ -99,27 +119,40 @@ describe("SubagentStart context", () => {
     expect(others.filter(matches)).toEqual([]);
   });
 
-  test("names the plugin's own paths, and each one exists", () => {
+  // Claude Code passes a subagent only hookSpecificOutput.additionalContext;
+  // plain stdout lands in the transcript but not in the subagent's context.
+  const context = (out) => {
+    const { hookSpecificOutput } = JSON.parse(out);
+    expect(hookSpecificOutput.hookEventName).toBe("SubagentStart");
+    return hookSpecificOutput.additionalContext;
+  };
+
+  test("prints the context as SubagentStart JSON", () => {
     const { status, out } = run(subagentHook, '{"agent_type":"general-purpose"}');
     expect(status).toBe(0);
+    const template = readFileSync(join(pluginRoot, "hooks/subagent-start-context.md"), "utf8").trimEnd();
+    expect(context(out)).toBe(template.replaceAll("<root>", pluginRoot));
+  });
+
+  test("names the plugin root once, and each path under it exists", () => {
+    const out = context(run(subagentHook, '{"agent_type":"general-purpose"}').out);
     expect(out).not.toContain("<root>");
-    const paths = [...out.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+    const [root, ...paths] = [...out.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+    expect(root).toBe(pluginRoot);
     expect(paths.length).toBeGreaterThan(0);
-    for (const path of paths) {
-      expect(path.startsWith(`${pluginRoot}/`)).toBe(true);
-      const rel = path.slice(pluginRoot.length + 1);
-      const found = rel.includes("*") ? [...new Bun.Glob(rel).scanSync({ cwd: pluginRoot })].length > 0 : existsSync(path);
+    for (const rel of paths) {
+      const found = rel.includes("*") ? [...new Bun.Glob(rel).scanSync({ cwd: pluginRoot })].length > 0 : existsSync(join(pluginRoot, rel));
       expect(`${rel}: ${found}`).toBe(`${rel}: true`);
     }
   });
 
-  test("copies a plugin root holding & and \\ as is", () => {
+  test("copies a plugin root holding &, \\, and a quote as is, in valid JSON", () => {
     const parent = mkdtempSync(join(tmpdir(), "pstack-turn-root-"));
     try {
-      const root = join(parent, "a&b\\c");
+      const root = join(parent, 'a&b\\c"d');
       cpSync(join(pluginRoot, "hooks"), join(root, "hooks"), { recursive: true });
       const { out } = run(subagentHook, "{}", { root });
-      expect(out).toContain(`\`${root}/skills/poteto-mode/SKILL.md\``);
+      expect(context(out)).toContain(`\`${root}\``);
     } finally {
       rmSync(parent, { recursive: true, force: true });
     }

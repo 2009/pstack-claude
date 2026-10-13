@@ -4,8 +4,8 @@ set -eu
 # Claude Code only (#264). `prompt` runs on UserPromptSubmit and reminds the
 # model of the routing bar until poteto-mode has been opened in the session.
 # `subagent` runs on SubagentStart and points a worker subagent at the
-# principles, since SessionStart does not fire for subagents. Plain stdout is
-# added to the context as a system reminder.
+# principles, since SessionStart does not fire for subagents. The prompt
+# reminder is plain stdout; the subagent context must be JSON (turn-context.awk).
 case "${1:-}" in
   prompt | subagent) ;;
   *)
@@ -23,35 +23,28 @@ if [ -f "$sheet" ] && [ -r "$sheet" ] && normalized=$(sh "$reader" "$sheet") &&
   exit 0
 fi
 
-input=$(cat)
+hooks="${CLAUDE_PLUGIN_ROOT}/hooks"
 
 if [ "$1" = subagent ]; then
-  # index and substr, not gsub, so an & or \ in the path is copied as is.
-  LC_ALL=C awk 'BEGIN { root = ENVIRON["CLAUDE_PLUGIN_ROOT"] }
-    {
-      out = ""
-      while ((i = index($0, "<root>")) > 0) {
-        out = out substr($0, 1, i - 1) root
-        $0 = substr($0, i + 6)
-      }
-      print out $0
-    }' "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-start-context.md"
+  cat >/dev/null
+  LC_ALL=C awk -v mode=subagent -f "$hooks/json.awk" -f "$hooks/turn-context.awk" </dev/null
   exit 0
 fi
 
+parsed=$(LC_ALL=C awk -v mode=prompt -f "$hooks/json.awk" -f "$hooks/turn-context.awk")
 # A prompt Claude Code sends itself, such as a background agent's report,
-# opens with a tag and starts no new task.
-if printf '%s\n' "$input" | grep -q '"prompt"[[:space:]]*:[[:space:]]*"<'; then
+# starts no new task.
+if [ "$(printf '%s\n' "$parsed" | sed -n 1p)" = self ]; then
   exit 0
 fi
 
 # Once the transcript shows poteto-mode opened, by the Skill tool, the slash
 # command, or a read of its file, the reminder has done its job. A transcript
 # that cannot be read leaves the reminder on.
-transcript=$(printf '%s\n' "$input" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+transcript=$(printf '%s\n' "$parsed" | sed -n 2p)
 if [ -n "$transcript" ] && [ -f "$transcript" ] && [ -r "$transcript" ] &&
   grep -qF -e '"skill":"pstack:poteto-mode"' -e '<command-name>/pstack:poteto-mode<' -e 'poteto-mode/SKILL.md' "$transcript"; then
   exit 0
 fi
 
-cat "${CLAUDE_PLUGIN_ROOT}/hooks/prompt-reminder.md"
+cat "$hooks/prompt-reminder.md"
